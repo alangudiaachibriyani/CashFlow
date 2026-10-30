@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AAB Cashflow</title>
+<style>
+:root{--ink:#14110f;--card:#1e1a17;--line:#3a322b;--cu:#c97b4a;--gold:#d9b25f;--sage:#8fae8b;--txt:#efe6da;--red:#e0766a}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:1000px;padding:16px;background:var(--ink);color:var(--txt);font:15px/1.4 'IBM Plex Sans',system-ui,sans-serif}
+h1{font:600 26px Fraunces,Georgia,serif;color:var(--gold);margin:0}
+h2{font:600 18px Fraunces,Georgia,serif;color:var(--gold);margin:22px 0 8px}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:8px;flex-wrap:wrap}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.card small{color:var(--cu);text-transform:uppercase;letter-spacing:.06em}
+.card b{display:block;margin-top:6px;font:600 22px 'IBM Plex Mono',monospace}
+.neg{color:var(--red)}
+input,select,button{background:var(--card);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:9px;font:inherit}
+button{background:var(--cu);color:#14110f;border:0;font-weight:600;cursor:pointer}
+button.ghost{background:none;color:var(--txt);border:1px solid var(--line)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:end}.row label{display:grid;gap:3px;font-size:12px;color:var(--cu)}
+.warn{background:#3b1f1b;border:1px solid var(--red);border-radius:8px;padding:10px;margin:12px 0}
+.tbl{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+td.n{text-align:right;font-family:'IBM Plex Mono',monospace}.in{color:var(--sage)}.out{color:var(--red)}
+.tabs button{margin-right:6px}.hide{display:none}#msg{margin:8px 0;color:var(--gold)}
+</style></head><body>
+<script src="cashflow_config.js"></script>
+<header><h1>AAB Cashflow</h1><div><span id="who"></span> <button class="ghost" id="out" onclick="logout()">Logout</button></div></header>
+<div id="msg"></div>
+
+<section id="login" class="row"><label>PIN<input id="pin" type="password" inputmode="numeric"></label><button onclick="login()">Open</button></section>
+
+<main id="app" class="hide">
+ <div class="tabs"><button onclick="tab('dash')">Dashboard</button><button class="ghost" onclick="tab('settle')">Settlement / Adjustment</button></div>
+
+ <div id="dash">
+  <h2>Balances</h2><div class="cards" id="cards"></div><div id="unm"></div>
+  <h2>Statement</h2>
+  <div class="row">
+   <label>Account<select id="sAcc" onchange="stmt()"></select></label>
+   <label>From<input type="date" id="sFrom" onchange="stmt()"></label>
+   <label>To<input type="date" id="sTo" onchange="stmt()"></label>
+  </div>
+  <div class="tbl"><table><thead><tr><th>Date</th><th>Type</th><th>Details</th><th>In</th><th>Out</th><th>Balance</th></tr></thead><tbody id="rows"></tbody></table></div>
+ </div>
+
+ <div id="settle" class="hide">
+  <h2>New entry</h2>
+  <div class="row">
+   <label>Type<select id="fType" onchange="fType()"><option>Transfer</option><option>Adjustment</option></select></label>
+   <label>Date<input type="date" id="fDate"></label>
+   <label id="lFrom">From<select id="fFrom"></select></label>
+   <label><span id="lTo">To</span><select id="fTo"></select></label>
+   <label><span id="lAmt">Amount (₹)</span><input type="number" id="fAmt" step="0.01"></label>
+   <label>Note<input id="fNote" placeholder="e.g. weekly settlement"></label>
+   <button onclick="save()">Save</button>
+  </div>
+  <p style="color:#a99" id="hint">Transfer moves money From → To. Examples: Perumal→Velu, Velu→Company, Company→Perumal (float), Cash (Company)→Federal Bank (deposit), Federal Bank→Cash (Company) (withdrawal), Federal↔HDFC.</p>
+ </div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);let D=null,PIN=sessionStorage.getItem('pin')||'';
+const inr=n=>'₹'+Number(n).toLocaleString('en-IN',{maximumFractionDigits:2});
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function login(){PIN=$('pin').value;load();}
+function logout(){sessionStorage.removeItem('pin');location.reload();}
+function tab(t){$('dash').classList.toggle('hide',t!=='dash');$('settle').classList.toggle('hide',t!=='settle');}
+function load(){
+  if(typeof CASHFLOW_API==='undefined'||CASHFLOW_API.startsWith('PASTE')){$('msg').textContent='⚠ Set CASHFLOW_API in cashflow_config.js';return;}
+  const cb='cb'+Date.now(),s=document.createElement('script');
+  window[cb]=d=>{delete window[cb];s.remove();
+    if(!d.ok){sessionStorage.removeItem('pin');$('msg').textContent=d.error||'Error';return;}
+    sessionStorage.setItem('pin',PIN);D=d;$('login').classList.add('hide');$('app').classList.remove('hide');$('who').textContent=d.user;$('msg').textContent='';render();};
+  s.onerror=()=>{$('msg').textContent='⚠ Could not reach the server (check URL / deployment access)';};
+  s.src=CASHFLOW_API+'?pin='+encodeURIComponent(PIN)+'&callback='+cb;document.body.appendChild(s);
+}
+function render(){
+  $('cards').innerHTML=D.accounts.map(a=>`<div class="card"><small>${a}</small><b class="${D.balances[a]<0?'neg':''}">${inr(D.balances[a])}</b></div>`).join('');
+  $('unm').innerHTML=D.unmapped.length?`<div class="warn">⚠ ${D.unmapped.length} entries (${inr(D.unmapped.reduce((s,x)=>s+x.amt,0))}) have an invalid payment mode and are NOT counted:<br>`+
+    D.unmapped.slice(0,10).map(x=>`${x.d} · ${x.src} · ${esc(x.desc)} · “${esc(x.mode)}” · ${inr(x.amt)}`).join('<br>')+'</div>':'';
+  const opts=D.accounts.map(a=>`<option>${a}</option>`).join('');
+  if(!$('sAcc').options.length){$('sAcc').innerHTML=opts;$('fFrom').innerHTML=opts;$('fTo').innerHTML=opts;$('fDate').valueAsDate=new Date();}
+  stmt();
+}
+function stmt(){
+  const a=$('sAcc').value,f=$('sFrom').value,t=$('sTo').value,E=D.entries.filter(e=>e.acc===a);
+  let run=D.balances[a]-E.reduce((s,e)=>s+e.i-e.o,0);
+  const R=E.map(e=>({...e,b:run+=e.i-e.o})).filter(e=>(!f||e.d>=f)&&(!t||e.d<=t)).reverse();
+  $('rows').innerHTML=R.map(e=>`<tr><td>${e.d}</td><td>${e.src}</td><td>${esc(e.desc)}</td><td class="n in">${e.i?inr(e.i):''}</td><td class="n out">${e.o?inr(e.o):''}</td><td class="n">${inr(e.b)}</td></tr>`).join('')||'<tr><td colspan="6">No entries</td></tr>';
+}
+function fType(){const adj=$('fType').value==='Adjustment';$('lFrom').classList.toggle('hide',adj);$('lTo').textContent=adj?'Account':'To';$('lAmt').textContent=adj?'Amount (+ add / − reduce)':'Amount (₹)';}
+async function save(){
+  const b={pin:PIN,type:$('fType').value,date:$('fDate').value,from:$('fFrom').value,to:$('fTo').value,amount:$('fAmt').value,note:$('fNote').value};
+  if(!b.date||!+b.amount){$('msg').textContent='Enter date and amount';return;}
+  if(b.type==='Transfer'&&b.from===b.to){$('msg').textContent='From and To must differ';return;}
+  if(b.type==='Adjustment'&&!b.note){$('msg').textContent='Adjustment needs a reason in Note';return;}
+  $('msg').textContent='Saving…';
+  try{await fetch(CASHFLOW_API,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify(b)});}
+  catch(e){$('msg').textContent='⚠ Save failed: '+e;return;}
+  $('fAmt').value='';$('fNote').value='';$('msg').textContent='Sent – refreshing to confirm…';
+  setTimeout(()=>{load();tab('dash');$('msg').textContent='Saved. Check the statement to confirm.';},1500);
+}
+if(PIN)load();
+</script></body></html>
